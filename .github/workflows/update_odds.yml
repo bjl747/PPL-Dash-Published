@@ -38,7 +38,6 @@ jobs:
               print('Error: API Key is missing! Check GitHub Secrets.')
               exit(1)
               
-          # Note: The Odds API 'ncaaf' endpoint is primarily FBS.
           sports = ['americanfootball_nfl', 'americanfootball_ncaaf']
           clean_games = []
 
@@ -52,28 +51,23 @@ jobs:
                   
                   # 3. TRANSLATE DATA
                   for game in data:
-                      spread_home = 'N/A'
-                      spread_away = 'N/A'
+                      spread_val = 'N/A' # Default
                       total_val = 'N/A'
 
                       bookmakers = game.get('bookmakers', [])
                       if bookmakers:
-                          # Prefer DraftKings, fallback to first available
                           main_bookie = next((b for b in bookmakers if b['key'] == 'draftkings'), bookmakers[0])
                           
-                          # Spread
+                          # Spread - Logic to find Home Team's spread line
                           spread_market = next((m for m in main_bookie['markets'] if m['key'] == 'spreads'), None)
                           if spread_market:
-                              for outcome in spread_market['outcomes']:
+                              # Find the outcome for the Home team
+                              outcome = next((o for o in spread_market['outcomes'] if o['name'] == game['home_team']), None)
+                              if outcome:
                                   point = outcome.get('point')
-                                  price = outcome.get('price')
-                                  # Format +/-
-                                  FormattedPoint = f'+{point}' if point > 0 else f'{point}'
-                                  
-                                  if outcome['name'] == game['home_team']:
-                                      spread_home = FormattedPoint
-                                  else:
-                                      spread_away = FormattedPoint
+                                  # Canvas logic will invert this for the away team, so just passing the raw number is safer, 
+                                  # but passing the Home Spread allows it to work with the logic you showed me.
+                                  spread_val = f'{point}' if point else 'N/A'
 
                           # Over/Under
                           total_market = next((m for m in main_bookie['markets'] if m['key'] == 'totals'), None)
@@ -82,13 +76,12 @@ jobs:
                               total_val = str(over_outcome.get('point', 'N/A'))
 
                       clean_game = {
-                          'raw_date': game['commence_time'], # Keep raw for sorting
-                          'game_info': game.get('notes', ''), # Grabs info like 'Fiesta Bowl' if available
+                          'date': game['commence_time'], # Canvas asked for 'date'
                           'home_team': game['home_team'],
                           'away_team': game['away_team'],
-                          'spread_home': spread_home,
-                          'spread_away': spread_away,
+                          'spread': spread_val, # Canvas asked for 'spread'
                           'over_under': total_val,
+                          'info': game.get('notes', ''), # Canvas asked for 'info'
                           'league': 'NFL' if 'nfl' in sport else 'NCAAF'
                       }
                       clean_games.append(clean_game)
@@ -96,9 +89,8 @@ jobs:
               except Exception as e:
                   print(f'Error fetching {sport}: {e}')
 
-          # 4. SORT BY DATE THEN SAVE
-          # Sort games by time so they appear in order
-          clean_games.sort(key=lambda x: x['raw_date'])
+          # 4. SORT AND SAVE
+          clean_games.sort(key=lambda x: x['date'])
           
           with open('odds.json', 'w') as f:
               json.dump(clean_games, f, indent=2)
@@ -109,4 +101,4 @@ jobs:
           git config --global user.name 'Odds-Bot'
           git config --global user.email 'bot@noreply.github.com'
           git add odds.json
-          git diff --quiet && git diff --staged --quiet || (git commit -m 'Update betting lines data structure' && git push)
+          git diff --quiet && git diff --staged --quiet || (git commit -m 'Update data structure to match Canvas' && git push)
